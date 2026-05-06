@@ -21,16 +21,24 @@ namespace FlightBooking.Services
         public Reservation CreateReservation(Passenger passenger, Flight flight, string seatNumber)
         {
             if (!flight.HasAvailableSeats())
+            {
+                AppLogger.Instance.Warning("BookingService",
+                    $"Zborul {flight.FlightNumber} nu are locuri disponibile.");
                 throw new InvalidOperationException($"Zborul {flight.FlightNumber} nu are locuri disponibile.");
+            }
 
-            var price      = _pricingStrategy.Calculate(flight);
-            var ticket     = new Ticket(flight, passenger, seatNumber, price);
+            var price       = _pricingStrategy.Calculate(flight);
+            var ticket      = new Ticket(flight, passenger, seatNumber, price);
             var reservation = new Reservation(passenger);
 
             reservation.AddTicket(ticket);
             flight.ReserveSeat();
-
             _reservationRepo.Save(reservation);
+
+            AppLogger.Instance.Info("BookingService",
+                $"Rezervare creata #{reservation.ReservationId} | {passenger.FullName} | " +
+                $"{flight.FlightNumber} | Loc:{seatNumber} | {price:C}");
+
             return reservation;
         }
 
@@ -39,6 +47,8 @@ namespace FlightBooking.Services
             var reservation = GetReservationOrThrow(reservationId);
             reservation.MarkAsPaid();
             _reservationRepo.Save(reservation);
+            AppLogger.Instance.Info("BookingService",
+                $"Rezervare #{reservationId} confirmata. Total: {reservation.TotalPrice:C}");
         }
 
         public void CancelReservation(string reservationId)
@@ -46,6 +56,8 @@ namespace FlightBooking.Services
             var reservation = GetReservationOrThrow(reservationId);
             reservation.Cancel();
             _reservationRepo.Save(reservation);
+            AppLogger.Instance.Warning("BookingService",
+                $"Rezervare #{reservationId} anulata de {reservation.Passenger.FullName}");
         }
 
         public Reservation? GetReservation(string reservationId) =>
