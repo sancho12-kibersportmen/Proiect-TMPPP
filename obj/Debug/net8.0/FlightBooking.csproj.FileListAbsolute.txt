@@ -12,3 +12,4 @@ C:\Users\user\Downloads\FlightBooking\FlightBooking\obj\Debug\net8.0\refint\Flig
 C:\Users\user\Downloads\FlightBooking\FlightBooking\obj\Debug\net8.0\FlightBooking.pdb
 C:\Users\user\Downloads\FlightBooking\FlightBooking\obj\Debug\net8.0\FlightBooking.genruntimeconfig.cache
 C:\Users\user\Downloads\FlightBooking\FlightBooking\obj\Debug\net8.0\ref\FlightBooking.dll
+C:\Users\user\Downloads\FlightBooking\FlightBooking\obj\Debug\net8.0\FlightBooking.sourcelink.json
