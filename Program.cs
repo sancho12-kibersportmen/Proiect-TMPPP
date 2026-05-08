@@ -1,3 +1,8 @@
+using FlightBooking.Behavioral.Command;
+using FlightBooking.Behavioral.Iterator;
+using FlightBooking.Behavioral.Memento;
+using FlightBooking.Behavioral.Observer;
+using FlightBooking.Behavioral.Strategy;
 using FlightBooking.Factories;
 using FlightBooking.Factories.Builder;
 using FlightBooking.Interfaces;
@@ -15,7 +20,7 @@ using FlightBooking.Tests;
 using FlightBooking.Utils;
 
 // ===================================================================
-//  FLIGHT BOOKING SYSTEM  –  Lab 1-5
+//  FLIGHT BOOKING SYSTEM  -  Lab 1-6 COMPLET
 // ===================================================================
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 AppLogger.Instance.Info("Program", "Aplicatia pornita.");
@@ -24,19 +29,16 @@ AppLogger.Instance.Info("Program", "Aplicatia pornita.");
 IFlightRepository      flightRepo      = new InMemoryFlightRepository();
 IReservationRepository reservationRepo = new InMemoryReservationRepository();
 IPricingStrategy       pricing         = new EarlyBirdPricingStrategy(new StandardPricingStrategy());
-
 var searchService  = new FlightSearchService(flightRepo);
 var bookingService = new BookingService(reservationRepo, pricing);
 DataSeeder.Seed(flightRepo);
 
-// Aeroporturi frecvent folosite
 var kiv = new Airport("KIV","Chisinau Int'l","Chisinau","Moldova");
 var otp = new Airport("OTP","Henri Coanda","Bucuresti","Romania");
 var cdg = new Airport("CDG","Charles de Gaulle","Paris","Franta");
 var lhr = new Airport("LHR","Heathrow","Londra","Anglia");
 var jfk = new Airport("JFK","JFK Airport","New York","SUA");
 
-// Director pentru zboruri demo
 var director = new FlightDirector(new FlightBuilder());
 var econFlight  = director.BuildEconomyShortHaul("DIR-EC1", kiv, lhr,
     DateTime.UtcNow.AddDays(8).Date.AddHours(7));
@@ -48,191 +50,261 @@ flightRepo.Add(econFlight);
 flightRepo.Add(bizFlight);
 flightRepo.Add(firstFlight);
 
-// Rezervare demo pentru demonstratii
-var demoPassenger   = new Passenger("Ion","Popescu","ion@demo.md","MD123");
-var demoFlight      = flightRepo.GetAll().First(f => f.HasAvailableSeats());
-var demoSeat        = SeatGenerator.Generate(demoFlight.TotalSeats);
-var demoReservation = bookingService.CreateReservation(demoPassenger, demoFlight, demoSeat);
-bookingService.ConfirmReservation(demoReservation.ReservationId);
-demoReservation     = bookingService.GetReservation(demoReservation.ReservationId)!;
+var demoPass = new Passenger("Ion","Popescu","ion@demo.md","MD123");
+var demoFlt  = flightRepo.GetAll().First(f => f.HasAvailableSeats());
+var demoRes  = bookingService.CreateReservation(demoPass, demoFlt,
+    SeatGenerator.Generate(demoFlt.TotalSeats));
+bookingService.ConfirmReservation(demoRes.ReservationId);
+demoRes = bookingService.GetReservation(demoRes.ReservationId)!;
 
 // ==================================================================
-//  LAB 5a – FLYWEIGHT: pool de aeroporturi partajate
+//  LAB 6a - STRATEGY: sortare si filtrare zboruri
 // ==================================================================
-PrintHeader("LAB 5a – FLYWEIGHT PATTERN");
+PrintHeader("LAB 6a - STRATEGY PATTERN");
 
-var fw = new AirportFlyweightFactory();
+var allFlights = flightRepo.GetAll().ToList();
+Console.WriteLine($"  Total zboruri: {allFlights.Count}");
 
-// Simulam 500 de zboruri care folosesc aceleasi aeroporturi
-Console.WriteLine("  Simulare 500 zboruri cu aeroporturi partajate...\n");
-var rng = new Random(42);
-string[] codes = { "KIV","OTP","CDG","LHR","FRA","IST","JFK","MAD","BCN","VIE" };
+var ctx = new FlightSearchContext();
 
-for (int i = 0; i < 500; i++)
+Console.WriteLine("\n  -- Sortare dupa pret crescator --");
+ctx.SetSortStrategy(new SortByPriceAscending());
+var sorted = ctx.Execute(allFlights).Take(3).ToList();
+sorted.ForEach(f => Console.WriteLine($"    {f.FlightNumber}: {f.BasePrice:C} | {f.Class}"));
+
+Console.WriteLine("\n  -- Filtrare Economy + sortare dupa durata --");
+ctx.SetFilterStrategy(new FilterByClass(SeatClass.Economy));
+ctx.SetSortStrategy(new SortByDuration());
+var filtered = ctx.Execute(allFlights).Take(3).ToList();
+filtered.ForEach(f => Console.WriteLine($"    {f.FlightNumber}: {f.Duration:hh\\:mm}h | {f.BasePrice:C}"));
+
+Console.WriteLine("\n  -- Schimbare strategie la runtime: pret max 150 --");
+ctx.SetFilterStrategy(new FilterByMaxPrice(150m));
+ctx.SetSortStrategy(new SortByPriceDescending());
+var cheap = ctx.Execute(allFlights).ToList();
+Console.WriteLine($"    Zboruri sub 150 EUR: {cheap.Count}");
+
+// ==================================================================
+//  LAB 6b - OBSERVER: notificari la schimbari zbor
+// ==================================================================
+PrintHeader("LAB 6b - OBSERVER PATTERN");
+
+var monitor   = new FlightMonitor();
+var passenger1 = new PassengerObserver("Ion Popescu",  "ion@demo.md");
+var passenger2 = new PassengerObserver("Maria Ionescu","maria@demo.md");
+var display    = new AirportDisplayObserver("Terminal A");
+var audit      = new AuditObserver();
+
+monitor.Subscribe(passenger1);
+monitor.Subscribe(passenger2);
+monitor.Subscribe(display);
+monitor.Subscribe(audit);
+
+Console.WriteLine("\n  Simulare evenimente zbor:\n");
+monitor.ReportDelay(econFlight, 45);
+Console.WriteLine();
+monitor.ReportGateChange(econFlight, "A12", "B07");
+Console.WriteLine();
+monitor.ReportPriceChange(bizFlight, 650m, 520m);
+Console.WriteLine();
+
+// Dezabonare pasager2 si anulare zbor
+monitor.Unsubscribe(passenger2);
+Console.WriteLine();
+monitor.ReportCancellation(firstFlight);
+Console.WriteLine();
+Console.WriteLine($"  Pasager1 a primit: {passenger1.ReceivedEvents.Count} evenimente");
+Console.WriteLine($"  Pasager2 a primit: {passenger2.ReceivedEvents.Count} (dezabonat inainte de anulare)");
+Console.WriteLine($"  Audit log: {audit.AuditLog.Count} intrari");
+
+// ==================================================================
+//  LAB 6c - COMMAND: Undo/Redo rezervari
+// ==================================================================
+PrintHeader("LAB 6c - COMMAND PATTERN (Undo/Redo)");
+
+var invoker   = new BookingCommandInvoker();
+var testFlt   = flightRepo.GetAll().First(f => f.HasAvailableSeats() && f.Class == SeatClass.Economy);
+
+var cmd1 = new CreateReservationCommand(bookingService,
+    new Passenger("Andrei","Stan","andrei@test.md","MD001"), testFlt, "10A");
+var cmd2 = new CreateReservationCommand(bookingService,
+    new Passenger("Elena","Marin","elena@test.md","MD002"), testFlt, "10B");
+
+Console.WriteLine("\n  -- Execute x2 --");
+invoker.Execute(cmd1);
+invoker.Execute(cmd2);
+invoker.PrintHistory();
+
+Console.WriteLine("\n  -- Undo (anuleaza ultima rezervare) --");
+invoker.Undo();
+invoker.PrintHistory();
+
+Console.WriteLine("\n  -- Redo (reface rezervarea anulata) --");
+invoker.Redo();
+invoker.PrintHistory();
+
+Console.WriteLine("\n  -- Undo din nou --");
+invoker.Undo();
+
+// Confirmare rezervare cu Command
+if (cmd1.CreatedReservation != null)
 {
-    var orig = codes[rng.Next(codes.Length)];
-    var dest = codes[rng.Next(codes.Length)];
-    fw.GetAirport(orig, orig + " Airport", orig + " City", "Country");
-    fw.GetAirport(dest, dest + " Airport", dest + " City", "Country");
+    var confirmCmd = new ConfirmReservationCommand(
+        bookingService, cmd1.CreatedReservation.ReservationId);
+    Console.WriteLine("\n  -- Confirmare rezervare prin Command --");
+    invoker.Execute(confirmCmd);
+    Console.WriteLine("\n  -- Undo la Confirmare --");
+    invoker.Undo();
 }
 
-fw.PrintPool();
-Console.WriteLine();
-fw.PrintStats();
-
-// Demo RouteKey
-Console.WriteLine("\n  RouteKey Flyweight:");
-var r1 = RouteKey.Get("KIV","OTP");
-var r2 = RouteKey.Get("KIV","OTP");  // refolosit
-var r3 = RouteKey.Get("KIV","CDG");
-Console.WriteLine($"  r1 == r2 (ReferenceEqual): {ReferenceEquals(r1, r2)}  <- partajate!");
-Console.WriteLine($"  RouteKey pool size: {RouteKey.PoolSize}");
-
 // ==================================================================
-//  LAB 5b – DECORATOR: servicii extra pe bilet
+//  LAB 6d - MEMENTO: Save/Load profil pasager
 // ==================================================================
-PrintHeader("LAB 5b – DECORATOR PATTERN");
+PrintHeader("LAB 6d - MEMENTO PATTERN (Save/Load)");
 
-var demoTicket = demoReservation.Tickets.First();
-
-// Configuratie 1: bilet simplu
-Console.WriteLine("  -- Configuratie 1: Bilet de baza --");
-IFlightService service1 = new BasicFlightService(demoTicket);
-service1.ShowDetails();
-Console.WriteLine($"  TOTAL: {service1.Price:C}\n");
-
-// Configuratie 2: bagaj + asigurare
-Console.WriteLine("  -- Configuratie 2: Bilet + Bagaj + Asigurare --");
-IFlightService service2 = new BasicFlightService(demoTicket);
-service2 = new BaggageDecorator(service2);
-service2 = new TravelInsuranceDecorator(service2);
-service2.ShowDetails();
-Console.WriteLine($"  TOTAL: {service2.Price:C}\n");
-
-// Configuratie 3: pachet complet (toate decoratorii)
-Console.WriteLine("  -- Configuratie 3: Pachet Complet (toate serviciile) --");
-IFlightService service3 = new BasicFlightService(demoTicket);
-service3 = new BaggageDecorator(service3, 32);
-service3 = new TravelInsuranceDecorator(service3);
-service3 = new PriorityBoardingDecorator(service3);
-service3 = new MealDecorator(service3, "Vegetarian");
-service3 = new LoungeAccessDecorator(service3);
-service3.ShowDetails();
-Console.WriteLine($"  TOTAL: {service3.Price:C}");
-
-// ==================================================================
-//  LAB 5c – BRIDGE: tipuri de notificare x formate de mesaj
-// ==================================================================
-PrintHeader("LAB 5c – BRIDGE PATTERN");
-
-Console.WriteLine("  -- Abstractizare: Confirmare | Implementor: PlainText --");
-new BookingConfirmationSender(new PlainTextRenderer()).Send(demoReservation);
-
-Console.WriteLine("  -- Abstractizare: Confirmare | Implementor: HTML --");
-new BookingConfirmationSender(new HtmlRenderer()).Send(demoReservation);
-
-Console.WriteLine("  -- Abstractizare: Reminder 24h | Implementor: Markdown --");
-new FlightReminderSender(new MarkdownRenderer(), 24).Send(demoReservation);
-
-Console.WriteLine("  -- Abstractizare: Anulare | Implementor: PlainText --");
-var cancelRes = new Reservation(demoPassenger);
-cancelRes.AddTicket(demoTicket);
-cancelRes.Cancel();
-new CancellationSender(new PlainTextRenderer()).Send(cancelRes);
-
-// ==================================================================
-//  LAB 5d – PROXY: Virtual (Cache) + Protection + Logging
-// ==================================================================
-PrintHeader("LAB 5d – PROXY PATTERN");
-
-// 1. Virtual Proxy (Cache)
-Console.WriteLine("  -- Virtual Proxy (Cache) --");
-var cachedProxy = new CachedFlightSearchProxy(searchService, TimeSpan.FromMinutes(5));
-var date = DateTime.UtcNow.AddDays(3).Date;
-
-cachedProxy.Search("KIV","IST", date);   // miss
-cachedProxy.Search("KIV","IST", date);   // hit
-cachedProxy.Search("KIV","IST", date);   // hit
-cachedProxy.Search("KIV","OTP", DateTime.UtcNow.AddDays(7).Date); // miss
-Console.WriteLine();
-cachedProxy.PrintStats();
-
-// 2. Protection Proxy
-Console.WriteLine("\n  -- Protection Proxy (Autorizare) --");
-
-var premiumUser  = new UserContext("premium1", UserRole.PremiumUser);
-var regularUser  = new UserContext("user1",    UserRole.RegisteredUser);
-var guestUser    = new UserContext("guest1",   UserRole.Guest);
-
-var premiumProxy = new AuthenticatedBookingProxy(bookingService, premiumUser);
-var regularProxy = new AuthenticatedBookingProxy(bookingService, regularUser);
-var guestProxy   = new AuthenticatedBookingProxy(bookingService, guestUser);
-
-// PremiumUser poate rezerva FirstClass
-try {
-    var res = premiumProxy.CreateReservation(
-        new Passenger("VIP","Client","vip@test.md","MD777"),
-        firstFlight, "1A");
-    Console.WriteLine($"  [PremiumUser] Rezervare FirstClass: OK #{res.ReservationId}");
-} catch (UnauthorizedAccessException ex) { Console.WriteLine($"  [PremiumUser] BLOCAT: {ex.Message}"); }
-
-// RegisteredUser nu poate rezerva FirstClass
-try {
-    regularProxy.CreateReservation(
-        new Passenger("Normal","User","user@test.md","MD888"),
-        firstFlight, "1B");
-    Console.WriteLine("  [RegisteredUser] Rezervare FirstClass: OK");
-} catch (UnauthorizedAccessException ex) { Console.WriteLine($"  [RegisteredUser] BLOCAT: {ex.Message}"); }
-
-// Guest nu poate rezerva deloc
-try {
-    guestProxy.CreateReservation(
-        new Passenger("Guest","User","guest@test.md","MD999"),
-        econFlight, "5C");
-    Console.WriteLine("  [Guest] Rezervare: OK");
-} catch (UnauthorizedAccessException ex) { Console.WriteLine($"  [Guest] BLOCAT: {ex.Message}"); }
-
-// 3. Logging Proxy
-Console.WriteLine("\n  -- Logging Proxy (Monitorizare) --");
-var loggingProxy = new LoggingFlightSearchProxy(searchService);
-loggingProxy.Search("KIV","IST", DateTime.UtcNow.AddDays(3).Date);
-loggingProxy.Search("KIV","OTP", DateTime.UtcNow.AddDays(7).Date);
-loggingProxy.Search("KIV","CDG", DateTime.UtcNow.AddDays(10).Date);
-Console.WriteLine();
-loggingProxy.PrintSearchReport();
-
-// ==================================================================
-//  LAB 4 recap – Adapter + Composite + Facade
-// ==================================================================
-PrintHeader("LAB 4 – ADAPTER / COMPOSITE / FACADE (recap)");
-
-Console.WriteLine("  [Adapter] Plata prin 3 procesatoare:");
-foreach (var proc in new IPaymentProcessor[]
+var profile = new PassengerProfile
 {
-    new PayPalAdapter(new PayPalGateway()),
-    new StripeAdapter(new StripeGateway()),
-    new MaibAdapter(new MaibBankGateway())
-})
+    FirstName      = "Ion",
+    LastName       = "Popescu",
+    Email          = "ion@demo.md",
+    PassportNo     = "MD123456",
+    SeatPreference = "Window",
+    MealPreference = "Standard",
+    FrequentFlyer  = "MV12345"
+};
+
+var history = new ProfileHistory();
+
+profile.Print("Starea initiala: ");
+history.Push(profile.Save("Initial"));
+
+// Modificare 1
+profile.SeatPreference = "Aisle";
+profile.MealPreference = "Vegetarian";
+profile.Print("Dupa modificare 1: ");
+history.Push(profile.Save("Vegetarian+Aisle"));
+
+// Modificare 2
+profile.FrequentFlyer  = "MV99999";
+profile.NewsletterSub  = true;
+profile.Print("Dupa modificare 2: ");
+history.Push(profile.Save("Premium upgrade"));
+
+Console.WriteLine();
+history.PrintHistory();
+
+// Undo - revenim la starea anterioara
+Console.WriteLine("\n  -- Undo (revenim la Vegetarian+Aisle) --");
+var prev = history.Undo();
+if (prev != null) profile.Restore(prev);
+profile.Print("Dupa Undo: ");
+
+// Undo inca o data
+Console.WriteLine("\n  -- Undo (revenim la Initial) --");
+prev = history.Undo();
+if (prev != null) profile.Restore(prev);
+profile.Print("Dupa al 2-lea Undo: ");
+
+// Redo
+Console.WriteLine("\n  -- Redo --");
+var next = history.Redo();
+if (next != null) profile.Restore(next);
+profile.Print("Dupa Redo: ");
+
+// ==================================================================
+//  LAB 6e - ITERATOR: parcurgere colectii
+// ==================================================================
+PrintHeader("LAB 6e - ITERATOR PATTERN");
+
+var flightCollection = new FlightCollection();
+flightCollection.AddRange(flightRepo.GetAll());
+Console.WriteLine($"  Colectie: {flightCollection.Count} zboruri\n");
+
+// Iterator secvential
+Console.WriteLine("  -- Iterator Secvential (primele 3) --");
+var seqIter = flightCollection.CreateIterator();
+int shown   = 0;
+while (seqIter.HasNext() && shown < 3)
 {
-    new PaymentService(proc).PayForReservation(demoReservation, demoPassenger.Email);
+    Console.WriteLine($"    [{seqIter.Position + 1}] {seqIter.Next()}");
+    shown++;
 }
 
+// Iterator invers
+Console.WriteLine("\n  -- Iterator Invers (ultimele 3) --");
+var revIter = flightCollection.CreateReverseIterator();
+shown = 0;
+while (revIter.HasNext() && shown < 3)
+{
+    Console.WriteLine($"    {revIter.Next()}");
+    shown++;
+}
+
+// Iterator filtrat - doar Economy cu locuri disponibile
+Console.WriteLine("\n  -- Iterator Filtrat (Economy, locuri disponibile) --");
+var filtIter = flightCollection.CreateFilteredIterator(
+    f => f.Class == SeatClass.Economy && f.HasAvailableSeats());
+int econCount = 0;
+while (filtIter.HasNext()) { filtIter.Next(); econCount++; }
+Console.WriteLine($"    Zboruri Economy disponibile: {econCount}");
+
+// Iterator pe ruta
+Console.WriteLine("\n  -- Iterator pe Ruta KIV->OTP --");
+var routeIter = flightCollection.IterateByRoute("KIV","OTP");
+int routeCount = 0;
+while (routeIter.HasNext()) { routeIter.Next(); routeCount++; }
+Console.WriteLine($"    Zboruri KIV->OTP: {routeCount}");
+
+// Iterator rezervari
+Console.WriteLine("\n  -- Iterator Rezervari --");
+var allReservations = reservationRepo.GetAll().ToList();
+var resIter = new ReservationIterator(allReservations);
+Console.WriteLine($"    Total rezervari: {resIter.Count}");
+var confirmed = resIter.Where(r => r.Status == ReservationStatus.Paid).ToList();
+Console.WriteLine($"    Rezervari confirmate: {confirmed.Count}");
+
+// ==================================================================
+//  RECAP Lab 4+5 (scurt)
+// ==================================================================
+PrintHeader("LAB 4+5 - RECAP STRUCTURAL PATTERNS");
+
+// Adapter
+Console.WriteLine("  [Adapter] Plata prin MAIB:");
+new PaymentService(new MaibAdapter(new MaibBankGateway()))
+    .PayForReservation(demoRes, demoPass.Email);
+
+// Composite
 Console.WriteLine("\n  [Composite] Pachet dus-intors:");
-var itin = new Itinerary("KIV <-> OTP Dus-Intors");
-itin.Add(new FlightSegment(econFlight, 89m));
-itin.Add(new FlightSegment(bizFlight,  79m));
-itin.Display();
+var itin = new Itinerary("KIV <-> Paris");
+itin.Add(new FlightSegment(econFlight, 145m));
+itin.Add(new FlightSegment(bizFlight,  130m));
+Console.WriteLine($"    Pret total: {itin.TotalPrice:C} | Durata: {itin.TotalDuration:hh\\:mm}h");
 
-Console.WriteLine("  [Facade] BookAndPay intr-un apel:");
-var facade = new BookingFacade(searchService, bookingService,
-    new PaymentService(new StripeAdapter(new StripeGateway())),
-    new TicketOutputService(new ConsoleOutputFactory()),
-    new EmailNotificationFactory());
-var facadeResult = facade.BookAndPay(
-    new Passenger("Maria","Ionescu","maria@test.md","RO654"),
-    flightRepo.GetAll().First(f => f.HasAvailableSeats() && f.Class == SeatClass.Economy),
-    "maria@test.md");
-Console.WriteLine($"  Rezultat: Success={facadeResult.Success} | ID={facadeResult.ReservationId}");
+// Decorator
+Console.WriteLine("\n  [Decorator] Bilet cu servicii extra:");
+IFlightService svc = new BasicFlightService(demoRes.Tickets.First());
+svc = new BaggageDecorator(svc);
+svc = new PriorityBoardingDecorator(svc);
+Console.WriteLine($"    {svc.ServiceName} -> Total: {svc.Price:C}");
+
+// Flyweight
+Console.WriteLine("\n  [Flyweight] Pool aeroporturi:");
+var fw = new AirportFlyweightFactory();
+for (int i = 0; i < 100; i++)
+    fw.GetAirport("KIV","Chisinau","Chisinau","Moldova");
+Console.WriteLine($"    100 cereri -> 1 instanta unica, {fw.ReusedCount} reutilizari");
+
+// Bridge
+Console.WriteLine("\n  [Bridge] Notificare Markdown:");
+new FlightReminderSender(new MarkdownRenderer(), 24).Send(demoRes);
+
+// Proxy
+Console.WriteLine("  [Proxy] Acces restrictionat (Guest):");
+var guestProxy = new AuthenticatedBookingProxy(
+    bookingService, new UserContext("guest1", UserRole.Guest));
+try { guestProxy.CreateReservation(demoPass, econFlight, "1A"); }
+catch (UnauthorizedAccessException ex)
+{ Console.WriteLine($"    BLOCAT: {ex.Message}"); }
 
 // ==================================================================
 //  TOATE TESTELE UNITARE
@@ -241,14 +313,15 @@ FactoryTests.RunAll();
 CreationalPatternsTests.RunAll();
 StructuralPatternsTests.RunAll();
 StructuralPatterns2Tests.RunAll();
+BehavioralPatternsTests.RunAll();
 
 Console.WriteLine($"\n  Total log entries: {AppLogger.Instance.EntryCount}");
-AppLogger.Instance.Info("Program","Aplicatia finalizata cu succes.");
+AppLogger.Instance.Info("Program","Toate laboratoarele finalizate cu succes!");
 Console.WriteLine();
 
 static void PrintHeader(string title)
 {
     Console.WriteLine();
-    var pad = new string('=', Math.Max(0, 50 - title.Length));
+    var pad = new string('=', Math.Max(0, 52 - title.Length));
     Console.WriteLine($"  == {title} {pad}");
 }
